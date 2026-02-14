@@ -6,29 +6,37 @@ format:
     number-sections: true
     geometry: "margin=0.5in"
     fontsize: 11pt
+execute:
+  warning: false
 knitr:
   opts_chunk:
     fig.align: "center"
 ---
 
-# Download and Setup
-(download data from GSE)
+# Downloading and Formatting the Data
+(download data from GSE, establish needed local directories, format data objects)
 
+(describe following code)
 ```{r}
-#| label: Downloading data from GEO
+#| label: Setup
 
-library(tidyverse) # dplyr, tidyr, tibble, readr, readxl
+library(tidyverse) # dplyr, tidyr, tibble, readr
+library(readxl)
+library(Biobase)
 library(GEOquery)
 
-dir.create(file.path("data_raw"), showWarnings = FALSE) # establish directory to accomodate GEO downloads
+dir.create(file.path("data_raw"), showWarnings = FALSE) # establish directory to raw data downloads
 
-supplemental_dir <- file.path("data_raw", "GSE107994")
+supplemental_dir <- file.path("data_raw", "GSE107994") # establish path to specific study directory
+```
+
+(describe following code)
+```{r}
+#| label: Download-counts
 
 if (!dir.exists(supplemental_dir) || length(list.files(supplemental_dir)) == 0) { # checks for supplemental files from GSE107994
   getGEOSuppFiles("GSE107994", baseDir = "data_raw") # accesses GEO for supplemental files (gene counts for all samples)
 }
-
-gse <- getGEO("GSE107994", GSEMatrix = TRUE) # grabs the series matrix
 
 counts_file <- list.files( # grabs the specific file name for the raw gene counts data
   path = supplemental_dir,
@@ -36,18 +44,41 @@ counts_file <- list.files( # grabs the specific file name for the raw gene count
   full.names = TRUE
 )
 
-phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as tabular sample metadata
 counts <- readxl::read_xlsx(counts_file) # function to import .xlsx file as data table
-
-if (!dir.exists("data_processed") || length(list.files("data_processed")) == 0) { # checks for extant data_processed directory
-  dir.create(file.path("data_processed"))
-}
-
-write_tsv(
-  x = phenotypes,
-  file = file.path("data_processed", "GSE107994_phenotypes.tsv")
-)
-
-write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv"))
 ```
 
+(describe following code)
+```{r}
+#| label: Download-phenotypes
+
+gse <- getGEO("GSE107994", GSEMatrix = TRUE) # grabs the series matrix from GEO
+phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as tabular sample metadata
+```
+
+(describe following code)
+```{r}
+#| label: Store-data
+
+dir.create("data_processed", showWarnings = FALSE) # create data_processed directory folder if it does not exist
+
+readr::write_tsv(phenotypes, file.path("data_processed", "GSE107994_phenotypes.tsv")) # save phenotypes locally
+readr::write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")) # save counts locally
+```
+
+{{< pagebreak >}}
+
+# Inspecting the Data
+(snapshot of counts and phenotypes tables, )
+```{r}
+#| label: Inspect-data
+
+print(counts)
+print(colnames(counts)[1:10])
+
+print(phenotypes)
+```
+
+{{< pagebreak >}}
+
+# Data Cleanup
+(standardize raw gene counts, reformat to cases x genes)

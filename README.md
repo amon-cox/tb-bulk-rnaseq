@@ -13,3 +13,12 @@ Data provided by ...
 install.packages("renv")
 renv::restore()
 ```
+
+## Sections to include
+
+- RNA-seq data cleaning and formatting
+- Sample-level overview with PCA
+- DESeq2
+- edgeR
+- limma
+- Comparisons between methods
