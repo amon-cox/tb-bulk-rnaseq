@@ -73,7 +73,6 @@ readr::write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")
 #| label: Inspect-data
 
 print(counts)
-print(colnames(counts)[1:10])
 
 print(phenotypes)
 ```
