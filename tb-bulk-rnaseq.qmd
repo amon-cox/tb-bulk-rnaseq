@@ -17,6 +17,7 @@ knitr:
 (download data from GSE, establish needed local directories, format data objects)
 
 (describe following code)
+
 ```{r}
 #| label: Setup
 
@@ -31,6 +32,7 @@ supplemental_dir <- file.path("data_raw", "GSE107994") # establish path to speci
 ```
 
 (describe following code)
+
 ```{r}
 #| label: Download-counts
 
@@ -48,6 +50,7 @@ counts <- readxl::read_xlsx(counts_file) # function to import .xlsx file as data
 ```
 
 (describe following code)
+
 ```{r}
 #| label: Download-phenotypes
 
@@ -56,6 +59,7 @@ phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as 
 ```
 
 (describe following code)
+
 ```{r}
 #| label: Store-data
 
@@ -69,6 +73,7 @@ readr::write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")
 
 # Inspecting the Data
 (snapshot of counts and phenotypes tables, )
+
 ```{r}
 #| label: Inspect-data
 
@@ -79,5 +84,45 @@ print(phenotypes)
 
 {{< pagebreak >}}
 
-# Data Cleanup
-(standardize raw gene counts, reformat to cases x genes)
+# Data Cleaup
+(reformat data, use one of the BioConductor packages to normalize, then use normalized data to plot a PCA)
+
+```{r}
+#| label: Reformat-data
+
+counts_mat <- counts |> # convert counts tibble into a simple matrix
+  select(-Gene_name, -Gene_biotype) |>
+  column_to_rownames("Genes") |>
+  as.matrix()
+
+colnames(counts_mat) <- phenotypes$geo_accession[match(colnames(counts_mat), phenotypes$title)] # replace with shorter names
+
+phenotypes_slim <- phenotypes |> # subset phenotypes to the columns of interest
+  select(
+    case = geo_accession,
+    patient_id = 'patient_id:ch1',
+    group = 'group:ch1',
+    tb_disease_type = 'tb_disease_type:ch1',
+    smear_result = 'smear_result:ch1',
+    outlier = 'outlier:ch1',
+    gender = 'gender:ch1',
+    ethnicity = 'ethnicity:ch1',
+    birthplace = 'birth_place:ch1',
+    age_baseline = 'age_at_baseline_visit:ch1',
+    timepoint_months = 'timepoint_months:ch1',
+    visit_date = 'visit_date:ch1',
+    title
+) |>
+  mutate(
+    group = factor(group, levels = c("Control", "Active_TB", "LTBI", "LTBI_Progressor")),
+    tb_disease_type = factor(tb_disease_type),
+    smear_result = factor(smear_result, levels = c("Negative", "Positive")),
+    gender = factor(gender)
+  )
+```
+
+{{< pagebreak >}}
+
+# Scenario 1
+(look at baseline samples, outlier = no, all disease types, and both sexes)
+(DESeq2, edgeR, and limma analyses of this subset)
