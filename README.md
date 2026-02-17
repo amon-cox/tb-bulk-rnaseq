@@ -18,7 +18,8 @@ renv::restore()
 
 - RNA-seq data cleaning and formatting
 - Sample-level overview with PCA
+- limma-voom
 - DESeq2
-- edgeR
-- limma
-- Comparisons between methods
+- GSEA(?)
+- Comparisons
+- Summary

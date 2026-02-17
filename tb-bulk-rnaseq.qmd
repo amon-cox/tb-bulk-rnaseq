@@ -13,7 +13,7 @@ knitr:
     fig.align: "center"
 ---
 
-# Downloading and Formatting the Data
+## Downloading and Formatting the Data
 (download data from GSE, establish needed local directories, format data objects)
 
 (describe following code)
@@ -28,7 +28,7 @@ library(GEOquery)
 
 dir.create(file.path("data_raw"), showWarnings = FALSE) # establish directory to raw data downloads
 
-supplemental_dir <- file.path("data_raw", "GSE107994") # establish path to specific study directory
+data_dir <- file.path("data_raw", "GSE107994") # establish path to specific study directory
 ```
 
 (describe following code)
@@ -36,12 +36,12 @@ supplemental_dir <- file.path("data_raw", "GSE107994") # establish path to speci
 ```{r}
 #| label: Download-counts
 
-if (!dir.exists(supplemental_dir) || length(list.files(supplemental_dir)) == 0) { # checks for supplemental files from GSE107994
+if (!dir.exists(data_dir) || length(list.files(data_dir)) == 0) { # checks for supplemental files from GSE107994
   getGEOSuppFiles("GSE107994", baseDir = "data_raw") # accesses GEO for supplemental files (gene counts for all samples)
 }
 
 counts_file <- list.files( # grabs the specific file name for the raw gene counts data
-  path = supplemental_dir,
+  path = data_dir,
   pattern = "Raw_counts.*Leicester.*\\.xlsx$",
   full.names = TRUE
 )
@@ -55,7 +55,7 @@ counts <- readxl::read_xlsx(counts_file) # function to import .xlsx file as data
 #| label: Download-phenotypes
 
 gse <- getGEO("GSE107994", GSEMatrix = TRUE) # grabs the series matrix from GEO
-phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as tabular sample metadata
+phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as tabular metadata
 ```
 
 (describe following code)
@@ -71,7 +71,7 @@ readr::write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")
 
 {{< pagebreak >}}
 
-# Inspecting the Data
+## Inspecting the Data
 (snapshot of counts and phenotypes tables, )
 
 ```{r}
@@ -84,13 +84,13 @@ print(phenotypes)
 
 {{< pagebreak >}}
 
-# Data Cleaup
-(reformat data, use one of the BioConductor packages to normalize, then use normalized data to plot a PCA)
+## Reformat Data
+(reformat data)
 
 ```{r}
 #| label: Reformat-data
 
-counts_mat <- counts |> # convert counts tibble into a simple matrix
+counts_mat <- counts |>
   select(-Gene_name, -Gene_biotype) |>
   column_to_rownames("Genes") |>
   as.matrix()
@@ -99,7 +99,7 @@ colnames(counts_mat) <- phenotypes$geo_accession[match(colnames(counts_mat), phe
 
 phenotypes_slim <- phenotypes |> # subset phenotypes to the columns of interest
   select(
-    case = geo_accession,
+    geo_accession,
     patient_id = 'patient_id:ch1',
     group = 'group:ch1',
     tb_disease_type = 'tb_disease_type:ch1',
@@ -113,7 +113,7 @@ phenotypes_slim <- phenotypes |> # subset phenotypes to the columns of interest
     visit_date = 'visit_date:ch1',
     title
 ) |>
-  mutate(
+  mutate( # apply some factor levels to multiple variables of interest
     group = factor(group, levels = c("Control", "Active_TB", "LTBI", "LTBI_Progressor")),
     tb_disease_type = factor(tb_disease_type),
     smear_result = factor(smear_result, levels = c("Negative", "Positive")),
@@ -123,6 +123,118 @@ phenotypes_slim <- phenotypes |> # subset phenotypes to the columns of interest
 
 {{< pagebreak >}}
 
-# Scenario 1
+## Scenario 1
 (look at baseline samples, outlier = no, all disease types, and both sexes)
-(DESeq2, edgeR, and limma analyses of this subset)
+
+```{r}
+#| label: Scenario-1-setup
+
+phenotypes_sc1 <- phenotypes_slim |>
+  filter( 
+    outlier == "No", # filter the data to remove predetermined outliers ...
+    timepoint_months == "Baseline" # ... and cases of active TB at the baseline sampling
+  )
+
+counts_sc1 <- counts_mat[, phenotypes_sc1$geo_accession]
+```
+
+{{< pagebreak >}}
+
+### Scenario 1 — limma
+(describe limma workflow)
+
+```{r}
+#| label: Scenario-1-limma
+
+library(edgeR) # limma loaded as dependency
+
+dge <- DGEList(counts = counts_sc1) # create DGEList object from raw counts matrix
+
+keep_genes <- filterByExpr(dge, group = phenotypes_sc1$group) # Determine which genes have sufficiently large counts to be retained in a statistical analysis
+
+dge <- dge[keep_genes, ] # retains only the genes determined to have sufficiently large counts
+
+dge <- calcNormFactors( # Calculate scaling factors to convert the raw library sizes into normalized effective library sizes
+  dge,
+  method = "TMM" # trimmed mean of M-values
+) # the data are not normalized yet. The factors are just stored in dge$samples$norm.factors for later use
+
+design_mat <- model.matrix(~ group, data = phenotypes_sc1) # prepare the design
+
+colnames(design_mat) <- c("Intercept", levels(phenotypes_sc1$group)[-1]) # adjust names
+```
+
+(code commentary)
+
+```{r}
+#| label: Scenario-1-limma-PCA
+
+voom_res <- voom(counts = dge, design = design_mat, plot = FALSE) # Transform count data to log2 counts-per-million (logCPM)
+
+pca <- prcomp(
+  x = t(voom_res$E),
+  center = TRUE,
+  scale. = TRUE
+)
+
+pca$rotation |>
+  as.data.frame() |>
+  rownames_to_column("gene") |>
+  write_csv(file = file.path("data_processed", "scenario1_pca_loadings.csv"))
+
+pca_df <- pca$x |>
+  as.data.frame() |>
+  rownames_to_column("case")
+
+write_csv(pca_df, file = file.path("data_processed", "scenario1_pca_scores.csv"))
+
+library(ggplot2)
+library(cowplot)
+
+prop_var <- pca$sdev^2 / sum(pca$sdev^2) * 100
+
+pca_plot <- pca_df |>
+  left_join(y = phenotypes_sc1, by = c("case" = "geo_accession")) |>
+  ggplot(aes(x = PC1, y = PC2, color = group)) +
+    geom_point(alpha = 0.75, size = 2) +
+    theme_minimal_grid() +
+    coord_fixed(ratio = 1) +
+    scale_color_viridis_d(direction = -1, begin = 0.1, end = 1) +
+    labs(
+      title = "PCA of voom-normalized expression",
+      x = paste0("PC1 (", round(prop_var[1], 2), "%)"),
+      y = paste0("PC2 (", round(prop_var[2], 2), "%)"),
+      subtitle = paste0(nrow(voom_res), " genes retained of ", nrow(counts), " genes measured")
+    )
+
+dir.create(file.path("plots"), showWarnings = FALSE)
+
+save_plot(
+  filename = file.path("plots", "scenario1_pca.png"),
+  plot = pca_plot,
+  bg = "white"
+)
+
+```
+
+
+### Scenario 1 — DESeq2
+(describe DESeq2 workflow)
+
+```{r}
+#| label: Scenario-1-DESeq2
+
+library(DESeq2)
+
+deseq_obj <- DESeqDataSetFromMatrix(
+  countData = counts_mat,
+  colData = phenotypes_slim,
+  design = ~ group, # specify the experimental variable
+  tidy = FALSE # counts_mat has row names, not a gene ID column
+)
+
+dds <- DESeq(deseq_obj)
+
+res <- results(dds, tidy = TRUE)
+
+```
