@@ -14,19 +14,23 @@ knitr:
 ---
 
 ## Overview
-Bulk RNA‑seq analysis of tuberculosis cohort GSE107994.
+Singhania et al. profiled whole‑blood gene expression from humans with active tuberculosis, latent TB infection (LTBI), and uninfected controls across multiple cohorts, using microarrays and RNA‑seq. Their main goal was to identify an optimal reduced gene set to serve as a diagnostic biomarker for active TB that did not pick up other diseases.
 
-Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. PMID: 29921861
+The Leicester RNA‑seq cohort (GSE107994) used here includes longitudinal whole‑blood samples from a low‑incidence setting, and consists of active TB patients (n = 53) and recent close contacts (n = 108). The close contacts were categorized as either Interferon-Gamma Release Assay (IGRA) negative (n = 50) or IGRA positive (n = 49), indicating the absence or presence of *Mycobacterium tuberculosis*, respectively. A subset of the initial close contact subjects were identified as having active TB during the longitudinal assessment (n = 9) based on microbiological confirmation.
+
+The authors used a modular analysis framework to group co‑expressed genes into immune “modules” (e.g. type I interferon–inducible, B‑cell, and T‑cell modules). They showed that active TB is characterized by overabundance of type I interferon‑inducible transcripts and underabundance of IFNG/TBX21 and B‑/T‑cell–associated genes, and that some individuals with LTBI display “outlier” active‑TB‑like signatures, suggesting phenotypic heterogeneity and possible higher progression risk.
+
+For this project intended to familiarize myself with bulk RNA-seq data, I focus first on a cross‑sectional baseline comparison between active TB, LTBI, and controls to reproduce key aspects of the transcriptional signature (e.g., interferon‑related changes), and then extend to longitudinal dynamics and heterogeneity within the LTBI and LTBI‑progressor groups.
+
+Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. [PMID: 29921861](https://pubmed.ncbi.nlm.nih.gov/29921861/)
 
 ## The Data
 (download data from GSE, establish needed local directories, format data objects)
 
-(describe following code)
-
 ```{r}
 #| label: Setup
 
-library(tidyverse) # dplyr, tidyr, tibble, readr
+library(tidyverse) # dplyr, tidyr, tibble, readr, ggplot2
 library(readxl)
 library(Biobase)
 library(GEOquery)
@@ -36,7 +40,8 @@ dir.create(file.path("data_raw"), showWarnings = FALSE) # establish directory to
 data_dir <- file.path("data_raw", "GSE107994") # establish path to specific study directory
 ```
 
-(describe following code)
+### Download data from GSE
+(describe procedure for downloading data from GSE)
 
 ```{r}
 #| label: Download-counts
@@ -54,7 +59,7 @@ counts_file <- list.files( # grabs the specific file name for the raw gene count
 counts <- readxl::read_xlsx(counts_file) # function to import .xlsx file as data table
 ```
 
-(describe following code)
+(get the phenotypic metadata)
 
 ```{r}
 #| label: Download-phenotypes
@@ -63,20 +68,11 @@ gse <- getGEO("GSE107994", GSEMatrix = TRUE) # grabs the series matrix from GEO
 phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as tabular metadata
 ```
 
-(describe following code)
-
-```{r}
-#| label: Store-data
-
-dir.create("data_processed", showWarnings = FALSE) # create data_processed directory folder if it does not exist
-
-readr::write_tsv(phenotypes, file.path("data_processed", "GSE107994_phenotypes.tsv")) # save phenotypes locally
-readr::write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")) # save counts locally
-```
-
 {{< pagebreak >}}
 
-(snapshot of counts and phenotypes tables, )
+### Inspection and storage
+
+(snapshot of counts and phenotypes tables, discuss the cases)
 
 ```{r}
 #| label: Inspect-data
@@ -86,22 +82,27 @@ print(counts)
 print(phenotypes)
 ```
 
-{{< pagebreak >}}
-
-## Reformat Data
-(reformat data)
 
 ```{r}
-#| label: Reformat-data
+#| label: Store-data
 
-counts_mat <- counts |>
-  select(-Gene_name, -Gene_biotype) |>
-  column_to_rownames("Genes") |>
-  as.matrix()
+dir.create("data_processed", showWarnings = FALSE) # create data_processed directory folder if it does not exist
 
-colnames(counts_mat) <- phenotypes$geo_accession[match(colnames(counts_mat), phenotypes$title)] # replace with shorter names
+write_tsv(phenotypes, file.path("data_processed", "GSE107994_phenotypes.tsv")) # save phenotypes locally
+write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")) # save counts locally
+```
 
-phenotypes_slim <- phenotypes |> # subset phenotypes to the columns of interest
+{{< pagebreak >}}
+
+## Analysis 1 - Baseline Cross-Section
+(Active TB vs inactive. Baseline samples. No outliers. Both sexes)
+(look for enrichment of type I IFN‑inducible genes. How does baseline expression differ between ATB and contacts, and do we recover the type I IFN signature?)
+(outliers determined by authors from transcriptional analyses)
+
+```{r}
+#| label: Analysis-1-setup
+
+phenotypes_baseline <- phenotypes |> # subset phenotypes to the columns of interest
   select(
     geo_accession,
     patient_id = 'patient_id:ch1',
@@ -122,42 +123,37 @@ phenotypes_slim <- phenotypes |> # subset phenotypes to the columns of interest
     tb_disease_type = factor(tb_disease_type),
     smear_result = factor(smear_result, levels = c("Negative", "Positive")),
     gender = factor(gender)
-  )
-
-write_tsv(phenotypes_slim, file = file.path("data_processed", "phenotypes.tsv"))
-```
-
-{{< pagebreak >}}
-
-## Analysis 1
-(Active TB vs LTBI vs LTBI progressor vs Control. Baseline samples. No outliers. Both sexes)
-(look for enrichment of type I IFN‑inducible genes)
-
-```{r}
-#| label: Scenario-1-setup
-
-phenotypes_sc1 <- phenotypes_slim |>
-  filter( 
+  ) |> 
+  dplyr::filter( 
     outlier == "No", # filter the data to remove predetermined outliers ...
-    timepoint_months == "Baseline" # ... and cases of active TB at the baseline sampling
+    timepoint_months == "Baseline" # ... and focus on those who had active/inactive TB at baseline
   )
 
-counts_sc1 <- counts_mat[, phenotypes_sc1$geo_accession]
+write_tsv(phenotypes_baseline, file = file.path("data_processed", "phenotypes_baseline.tsv"))
+
+counts_mat <- counts |> # need to convert counts to a simple matrix
+  select(-Gene_name, -Gene_biotype) |>
+  column_to_rownames("Genes") |>
+  as.matrix()
+
+colnames(counts_mat) <- phenotypes$geo_accession[match(colnames(counts_mat), phenotypes$title)] # replace with shorter names
+
+counts_baseline <- counts_mat[, phenotypes_baseline$geo_accession] # select only baseline samples
 ```
 
 {{< pagebreak >}}
 
-### Analysis 1.1 — limma
-(describe limma workflow)
+### Preprocessing
+(describe intro to limma workflow)
 
 ```{r}
-#| label: Scenario-1-limma
+#| label: Analysis-1-preprocess
 
 library(edgeR) # limma loaded as dependency
 
-dge <- DGEList(counts = counts_sc1) # create DGEList object from raw counts matrix
+dge <- DGEList(counts = counts_baseline) # create DGEList object from raw counts matrix
 
-keep_genes <- filterByExpr(dge, group = phenotypes_sc1$group) # Determine which genes have sufficiently large counts to be retained in a statistical analysis
+keep_genes <- filterByExpr(dge, group = phenotypes_baseline$group) # Determine which genes have sufficiently large counts to be retained in a statistical analysis
 
 dge <- dge[keep_genes, ] # retains only the genes determined to have sufficiently large counts
 
@@ -165,21 +161,41 @@ dge <- calcNormFactors( # Calculate scaling factors to convert the raw library s
   dge,
   method = "TMM" # trimmed mean of M-values
 ) # the data are not normalized yet. The factors are just stored in dge$samples$norm.factors for later use
+```
 
-design_mat <- model.matrix(~ group, data = phenotypes_sc1) # prepare the design
+(discuss DGE object and norm factors, not yet applied)
 
-colnames(design_mat) <- c("Intercept", levels(phenotypes_sc1$group)[-1]) # adjust names
+```{r}
+#| label: Display-dge
+#| echo: false
+
+print(head(dge$samples))
 ```
 
 (code commentary)
 
 ```{r}
-#| label: Scenario-1-limma-PCA
+#| label: Analysis-1-design
 
-voom_res <- voom(counts = dge, design = design_mat, plot = FALSE) # Transform count data to log2 counts-per-million (logCPM)
+design_mat <- model.matrix(~ 0 + group, data = phenotypes_baseline) # prepare the design
 
-pca <- prcomp(
-  x = t(voom_res$E),
+colnames(design_mat) <- levels(phenotypes_baseline$group) # adjust names
+
+voom_res <- voom(counts = dge, design = design_mat, plot = TRUE) # transform count data to log2 counts-per-million (logCPM)
+  # incorporates the calc norm factors
+```
+
+(code commentary) 
+
+{{< pagebreak >}}
+
+### Principal Components Analysis
+
+```{r}
+#| label: Analysis-1-PCA
+
+pca <- prcomp( # perform PCA
+  x = t(voom_res$E), # must transpose data to samples x variables format
   center = TRUE,
   scale. = TRUE
 )
@@ -195,14 +211,15 @@ pca_df <- pca$x |>
 
 write_csv(pca_df, file = file.path("data_processed", "analysis1_pca_scores.csv"))
 
-library(ggplot2)
+prop_var <- pca$sdev^2 / sum(pca$sdev^2) * 100 # calculaute proportion of variance per PC
+
+dir.create(file.path("output", "plots"), showWarnings = FALSE, recursive = TRUE)
+
 library(cowplot)
 
-prop_var <- pca$sdev^2 / sum(pca$sdev^2) * 100
-
 pca_plot <- pca_df |>
-  left_join(y = phenotypes_sc1, by = c("case" = "geo_accession")) |>
-  ggplot(aes(x = PC1, y = PC2, color = group)) +
+  left_join(y = phenotypes_baseline, by = c("case" = "geo_accession")) |>
+  ggplot(aes(x = PC1, y = PC2, color = group, shape = gender)) +
     geom_point(alpha = 0.75, size = 2) +
     theme_minimal_grid() +
     coord_fixed(ratio = 1) +
@@ -214,36 +231,131 @@ pca_plot <- pca_df |>
       subtitle = paste0(nrow(voom_res), " genes retained of ", nrow(counts), " genes measured")
     )
 
-dir.create(file.path("plots"), showWarnings = FALSE)
-
 save_plot(
-  filename = file.path("plots", "analysis1_pca.png"),
+  filename = file.path("output", "plots", "analysis1_pca.png"),
   plot = pca_plot,
   bg = "white"
 )
 
 ```
 
+{{< pagebreak >}}
 
-### Analysis 1.2 — DESeq2
-(describe DESeq2 workflow)
+(describe PCA overview)
+(noticeable contrast between active TB and the recent contact subjects)
 
 ```{r}
-#| label: Scenario-1-DESeq2
+#| label: Analysis-1-PCA-plot
+#| echo: false
 
-library(DESeq2)
+pca_plot
+```
 
-deseq_obj <- DESeqDataSetFromMatrix(
-  countData = counts_mat,
-  colData = phenotypes_slim,
-  design = ~ group, # specify the experimental variable
-  tidy = FALSE # counts_mat has row names, not a gene ID column
+{{< pagebreak >}}
+
+### Fitting linear models
+(uses original limma function)
+
+```{r}
+#| label: Analysis-1-limma
+
+fit <- lmFit(
+  object = voom_res,
+  design = design_mat
 )
 
-dds <- DESeq(deseq_obj)
+print(head(coef(fit)))
+```
 
-res <- results(dds, tidy = TRUE)
+(describe limma output)
 
+```{r}
+#| label: Analysis-1-contrasts
+
+contrasts_mat <- makeContrasts(
+  ATB_vs_allContacts = Active_TB - (Control + LTBI + LTBI_Progressor)/3,
+  ATB_vs_Controls = Active_TB - Control,
+  Progressors_vs_LTBI = LTBI_Progressor - LTBI,
+  levels = design_mat
+)
+
+fit2 <- contrasts.fit(fit, contrasts_mat) |>
+  eBayes()
+
+print(head(coef(fit2)))
+```
+
+(describe additional steps of making contrasts, eBayes)
+
+{{< pagebreak >}}
+
+```{r}
+#| label: Analysis-1-exports
+
+dir.create(file.path("output", "tables"), showWarnings = FALSE, recursive = TRUE)
+
+DE_genes <- list()
+
+for (i in seq_along(colnames(contrasts_mat))) {
+
+  top_table <- topTable(
+    fit = fit2,
+    coef = i,
+    number = Inf,
+    adjust.method = "BH",
+    sort.by = "P"
+  ) |>
+    rownames_to_column("gene")
+  
+  top_table |>
+    dplyr::filter(adj.P.Val < .05) |> # only export significant results
+    write_csv(
+      file = file.path(
+        "output", "tables",
+        paste0("analysis1_limma_", colnames(contrasts_mat)[i], ".csv")
+      )
+    )
+
+  DE_genes[[colnames(contrasts_mat)[i]]] <- top_table
+
+}
+
+```
+
+{{< pagebreak >}}
+
+### Plotting differentially expressed features
+
+```{r}
+#| label: Analysis-1-plot-features
+
+DE_genes_df <- bind_rows(DE_genes, .id = "contrast") # collapse list to data frame
+
+DE_genes_plot <- DE_genes_df |>
+  mutate(significant = adj.P.Val < .05 & abs(logFC) > 1) |>
+  ggplot(aes(x = logFC, y = -log10(adj.P.Val), color = significant)) +
+    geom_point(size = 1, alpha = 0.8) +
+    facet_wrap(~ contrast, nrow = 1) +
+    theme_half_open() +
+    theme(legend.position = "bottom") +
+    scale_color_manual(values = c("FALSE" = "grey70", "TRUE" = "#48bda6")) +
+    scale_y_continuous(expand = c(0,0), limits = c(0,NA)) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "grey40") +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey40") +
+    geom_vline(xintercept = -1, linetype = "dotted", color = "grey40") +
+    labs(
+      x = "log2 fold change",
+      y = "-log10 adj. p value",
+      title = "Differentially expressed genes"
+    )
+
+cowplot::save_plot(
+  filename = file.path("output", "plots", "analysis1_limma_contrasts.png"),
+  plot = DE_genes_plot,
+  bg = "white"
+)
+
+DE_genes_plot
 ```
 
 ## Analysis 2
