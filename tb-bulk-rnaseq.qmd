@@ -13,7 +13,12 @@ knitr:
     fig.align: "center"
 ---
 
-## Downloading and Formatting the Data
+## Overview
+Bulk RNA‑seq analysis of tuberculosis cohort GSE107994.
+
+Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. PMID: 29921861
+
+## The Data
 (download data from GSE, establish needed local directories, format data objects)
 
 (describe following code)
@@ -71,7 +76,6 @@ readr::write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")
 
 {{< pagebreak >}}
 
-## Inspecting the Data
 (snapshot of counts and phenotypes tables, )
 
 ```{r}
@@ -119,12 +123,15 @@ phenotypes_slim <- phenotypes |> # subset phenotypes to the columns of interest
     smear_result = factor(smear_result, levels = c("Negative", "Positive")),
     gender = factor(gender)
   )
+
+write_tsv(phenotypes_slim, file = file.path("data_processed", "phenotypes.tsv"))
 ```
 
 {{< pagebreak >}}
 
-## Scenario 1
-(look at baseline samples, outlier = no, all disease types, and both sexes)
+## Analysis 1
+(Active TB vs LTBI vs LTBI progressor vs Control. Baseline samples. No outliers. Both sexes)
+(look for enrichment of type I IFN‑inducible genes)
 
 ```{r}
 #| label: Scenario-1-setup
@@ -140,7 +147,7 @@ counts_sc1 <- counts_mat[, phenotypes_sc1$geo_accession]
 
 {{< pagebreak >}}
 
-### Scenario 1 — limma
+### Analysis 1.1 — limma
 (describe limma workflow)
 
 ```{r}
@@ -180,13 +187,13 @@ pca <- prcomp(
 pca$rotation |>
   as.data.frame() |>
   rownames_to_column("gene") |>
-  write_csv(file = file.path("data_processed", "scenario1_pca_loadings.csv"))
+  write_csv(file = file.path("data_processed", "analysis1_pca_loadings.csv"))
 
 pca_df <- pca$x |>
   as.data.frame() |>
   rownames_to_column("case")
 
-write_csv(pca_df, file = file.path("data_processed", "scenario1_pca_scores.csv"))
+write_csv(pca_df, file = file.path("data_processed", "analysis1_pca_scores.csv"))
 
 library(ggplot2)
 library(cowplot)
@@ -210,7 +217,7 @@ pca_plot <- pca_df |>
 dir.create(file.path("plots"), showWarnings = FALSE)
 
 save_plot(
-  filename = file.path("plots", "scenario1_pca.png"),
+  filename = file.path("plots", "analysis1_pca.png"),
   plot = pca_plot,
   bg = "white"
 )
@@ -218,7 +225,7 @@ save_plot(
 ```
 
 
-### Scenario 1 — DESeq2
+### Analysis 1.2 — DESeq2
 (describe DESeq2 workflow)
 
 ```{r}
@@ -238,3 +245,6 @@ dds <- DESeq(deseq_obj)
 res <- results(dds, tidy = TRUE)
 
 ```
+
+## Analysis 2
+(look at the longitudinal view within LTBI)
