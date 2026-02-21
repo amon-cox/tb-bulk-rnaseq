@@ -1,6 +1,6 @@
 # tb-bulk-rnaseq
 
-Bulk RNA‑seq analysis of tuberculosis cohort GSE107994 using R and Quarto.
+Bulk RNA‑seq analysis of tuberculosis cohort GSE107994 using R in Quarto.
 
 Singhania et al. profiled whole‑blood gene expression from humans with active tuberculosis, latent TB infection (LTBI), and uninfected controls across multiple cohorts, using microarrays and RNA‑seq. Their main goal was to identify an optimal reduced gene set to serve as a diagnostic biomarker for active TB that did not pick up other diseases. They showed that active TB is characterized by overabundance of type I interferon‑inducible transcripts and underabundance of IFNG/TBX21 and B‑/T‑cell–associated genes, and that some individuals with LTBI display “outlier” active‑TB‑like signatures, suggesting phenotypic heterogeneity and possible higher progression risk.
 
@@ -13,7 +13,7 @@ For this project intended to familiarize myself with bulk RNA-seq data, I focus 
 - R environment and package dependencies managed with `renv`.
 - Bulk RNA-seq counts and sample metadata downloaded from GEO (GSE107994).
 - Lowly expressed genes filtered using `edgeR::filterByExpr`.
-- Library size normalization with edgeR (TMM, trimmed mean of M-values).
+- Library size normalization with `edgeR` (TMM, trimmed mean of M-values).
 - `voom` transformation to log2 counts-per-million with precision weights (limma-voom).
 - Design matrix encoding baseline disease groups (Control, Active_TB, LTBI, LTBI_Progressor).
 - Differential expression analysis with limma:
@@ -33,7 +33,7 @@ renv::restore()
 quarto::quarto_render("tb-bulk-rnaseq.qmd")
 ```
 
-- PCA on voom-normalized expression shows clear separation of active TB from recent contacts at baseline.
+- PCA on voom-normalized expression shows separation of active TB from recent contacts at baseline.
 - Limma-voom identifies >10,000 differentially expressed genes between active TB and recent contacts (FDR < 0.05).
 - Interferon-inducible genes are upregulated and IFNG/TBX21 and B/T-cell marker genes are relatively downregulated in active TB, consistent with the modular signature of Singhania et al.
 
