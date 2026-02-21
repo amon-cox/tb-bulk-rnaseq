@@ -411,7 +411,8 @@ DE_genes_df |> filter(adj.P.Val < .05) |> count(contrast)
 
 {{< pagebreak >}}
 
-(What next for Analysis 1? Checking gene identities? re-PCA from a subset of only the DE genes?)
-
-## Analysis 2 — LTBI longitudinal view
-(look at the longitudinal view within LTBI)
+## WIP
+- re-PCA from subset of only DE genes
+- check gene biotypes and identities
+- compare DE genes to authors' findings
+- Analysis 2 — longitudinal view within LTBI

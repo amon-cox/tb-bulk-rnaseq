@@ -2,9 +2,11 @@
 
 Bulk RNA‑seq analysis of tuberculosis cohort GSE107994 using R and Quarto.
 
-This is a personal project to get acquainted with bulk RNA-Seq data in relation to human disease. The R code for managing and analyzing the data will be stored and discussed within a Quarto document (.qmd) to serve as a walkthrough. The data were produced by Singhania A, Verma R, Graham CM, Lee J et al. through expression profiling by high throughput sequencing of whole blood samples from *Homo sapiens*.
+Singhania et al. profiled whole‑blood gene expression from humans with active tuberculosis, latent TB infection (LTBI), and uninfected controls across multiple cohorts, using microarrays and RNA‑seq. Their main goal was to identify an optimal reduced gene set to serve as a diagnostic biomarker for active TB that did not pick up other diseases. They showed that active TB is characterized by overabundance of type I interferon‑inducible transcripts and underabundance of IFNG/TBX21 and B‑/T‑cell–associated genes, and that some individuals with LTBI display “outlier” active‑TB‑like signatures, suggesting phenotypic heterogeneity and possible higher progression risk.
 
-> Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. PMID: 29921861
+For this project intended to familiarize myself with bulk RNA-seq data, I focus first on a cross‑sectional baseline comparison between active TB, LTBI, and controls to reproduce key aspects of the transcriptional signature (e.g., interferon‑related changes), and then extend to longitudinal dynamics and heterogeneity within the LTBI and LTBI‑progressor groups.
+
+> Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. [PMID: 29921861](https://pubmed.ncbi.nlm.nih.gov/29921861/)
 
 ## Setup
 
@@ -12,13 +14,3 @@ This is a personal project to get acquainted with bulk RNA-Seq data in relation 
 install.packages("renv")
 renv::restore()
 ```
-
-## Sections to include
-
-- RNA-seq data cleaning and formatting
-- Sample-level overview with PCA
-- limma-voom
-- DESeq2
-- GSEA(?)
-- Comparisons
-- Summary
