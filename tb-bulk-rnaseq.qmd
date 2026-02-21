@@ -13,6 +13,8 @@ knitr:
     fig.align: "center"
 ---
 
+{{< pagebreak >}}
+
 ## Overview
 Singhania et al. profiled whole‑blood gene expression from humans with active tuberculosis, latent TB infection (LTBI), and uninfected controls across multiple cohorts, using microarrays and RNA‑seq. Their main goal was to identify an optimal reduced gene set to serve as a diagnostic biomarker for active TB that did not pick up other diseases.
 
@@ -22,10 +24,12 @@ The authors used a modular analysis framework to group co‑expressed genes into
 
 For this project intended to familiarize myself with bulk RNA-seq data, I focus first on a cross‑sectional baseline comparison between active TB, LTBI, and controls to reproduce key aspects of the transcriptional signature (e.g., interferon‑related changes), and then extend to longitudinal dynamics and heterogeneity within the LTBI and LTBI‑progressor groups.
 
-Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. [PMID: 29921861](https://pubmed.ncbi.nlm.nih.gov/29921861/)
+> Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. [PMID: 29921861](https://pubmed.ncbi.nlm.nih.gov/29921861/)
+
+{{< pagebreak >}}
 
 ## The Data
-(download data from GSE, establish needed local directories, format data objects)
+The first step is to load some initial R packages to make managing data objects easier (e.g. tidyverse, readxl) and to specifically handle data from the Gene Expression Omnibus (GEO; e.g. GEOquery, Biobase). The code chunk below also establishes a directory to store the data.
 
 ```{r}
 #| label: Setup
@@ -41,7 +45,7 @@ data_dir <- file.path("data_raw", "GSE107994") # establish path to specific stud
 ```
 
 ### Download data from GSE
-(describe procedure for downloading data from GSE)
+Accessing GEO can be time-intensive, so the first section of this code chunk checks if the necessary files are already downloaded before attempting to access GEO. The following code then converts the Excel file into data frame.
 
 ```{r}
 #| label: Download-counts
@@ -59,7 +63,7 @@ counts_file <- list.files( # grabs the specific file name for the raw gene count
 counts <- readxl::read_xlsx(counts_file) # function to import .xlsx file as data table
 ```
 
-(get the phenotypic metadata)
+This section accesses GEO again to retrieve the series matrix, which contains the metadata (e.g. patient info, phenotypes) for the RNA-seq profiles.
 
 ```{r}
 #| label: Download-phenotypes
@@ -71,17 +75,27 @@ phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as 
 {{< pagebreak >}}
 
 ### Inspection and storage
-
-(snapshot of counts and phenotypes tables, discuss the cases)
+The counts object contains raw expression counts for 58,051 genes from 175 whole-blood profiles. Also listed are the gene names and general category (e.g. protein-coding, sRNA, rRNA, non-coding).
 
 ```{r}
-#| label: Inspect-data
+#| label: Inspect-counts
+#| echo: false
 
 print(counts)
+```
+
+{{< pagebreak >}}
+
+The phenotypes object contains all the information regarding the RNA-seq profiles, including patient info and RNA sequencing steps.
+
+```{r}
+#| label: Inspect-phenotypes
+#| echo: false
 
 print(phenotypes)
 ```
 
+Before moving on to analysis, the data are saved to an intermediate folder for easy referencing later.
 
 ```{r}
 #| label: Store-data
@@ -95,15 +109,15 @@ write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")) # sav
 {{< pagebreak >}}
 
 ## Analysis 1 - Baseline Cross-Section
-(Active TB vs inactive. Baseline samples. No outliers. Both sexes)
-(look for enrichment of type I IFN‑inducible genes. How does baseline expression differ between ATB and contacts, and do we recover the type I IFN signature?)
-(outliers determined by authors from transcriptional analyses)
+The first analysis will be focused on differences in expression profiles between active TB cases and recent contacts, and on recovering the type I IFN signatures determined by Singhania et al. The data are subset to baseline profiles and outliers previously determined by the authors are removed ahead of analysis.
+
+The code below selects columns of interest from the metadata and renames them for easier calling. Then, it establishes some factor levels to be used in subsequent analyses and visualizations before filtering down to the desired samples. The counts object is also reformatted into a simple matrix for compatability with various modeling functions.
 
 ```{r}
 #| label: Analysis-1-setup
 
-phenotypes_baseline <- phenotypes |> # subset phenotypes to the columns of interest
-  select(
+phenotypes_baseline <- phenotypes |> 
+  select( # subset phenotypes to the columns of interest
     geo_accession,
     patient_id = 'patient_id:ch1',
     group = 'group:ch1',
@@ -125,9 +139,11 @@ phenotypes_baseline <- phenotypes |> # subset phenotypes to the columns of inter
     gender = factor(gender)
   ) |> 
   dplyr::filter( 
-    outlier == "No", # filter the data to remove predetermined outliers ...
-    timepoint_months == "Baseline" # ... and focus on those who had active/inactive TB at baseline
+    outlier == "No",
+    timepoint_months == "Baseline"
   )
+    # filter the data to remove predetermined outliers
+    # and focus on the baseline visit profiles
 
 write_tsv(phenotypes_baseline, file = file.path("data_processed", "phenotypes_baseline.tsv"))
 
@@ -136,15 +152,19 @@ counts_mat <- counts |> # need to convert counts to a simple matrix
   column_to_rownames("Genes") |>
   as.matrix()
 
-colnames(counts_mat) <- phenotypes$geo_accession[match(colnames(counts_mat), phenotypes$title)] # replace with shorter names
+colnames(counts_mat) <- phenotypes$geo_accession[match(colnames(counts_mat), phenotypes$title)]
+  # replace with shorter names
 
-counts_baseline <- counts_mat[, phenotypes_baseline$geo_accession] # select only baseline samples
+counts_baseline <- counts_mat[, phenotypes_baseline$geo_accession]
+  # select only baseline samples
 ```
 
 {{< pagebreak >}}
 
 ### Preprocessing
-(describe intro to limma workflow)
+The edgeR package is loaded for some of its functions used to prepare the data for modeling, and it calls the limma package as a dependency. One such function, filterByExpr(), marks genes for retention that have a minimum count of reads in a worthwhile number of samples. These cutoffs are determined based on each profile's library size, and the process is based on a filtering strategy outlined in Chen et al. (2016).
+
+> Chen Y, Lun ATL, and Smyth, GK (2016). From reads to genes to pathways: differential expression analysis of RNA-Seq experiments using Rsubread and the edgeR quasi-likelihood pipeline. _F1000Research_ 5, 1438. doi:10.12688/f1000research.8987.2 <https://doi.org/10.12688/f1000research.8987.2>
 
 ```{r}
 #| label: Analysis-1-preprocess
@@ -153,17 +173,18 @@ library(edgeR) # limma loaded as dependency
 
 dge <- DGEList(counts = counts_baseline) # create DGEList object from raw counts matrix
 
-keep_genes <- filterByExpr(dge, group = phenotypes_baseline$group) # Determine which genes have sufficiently large counts to be retained in a statistical analysis
+keep_genes <- filterByExpr(dge, group = phenotypes_baseline$group)
+  # Determine which genes have sufficient counts to be retained in a statistical analysis
 
 dge <- dge[keep_genes, ] # retains only the genes determined to have sufficiently large counts
 
-dge <- calcNormFactors( # Calculate scaling factors to convert the raw library sizes into normalized effective library sizes
+dge <- calcNormFactors( # Calculate scaling factors for library sizes
   dge,
   method = "TMM" # trimmed mean of M-values
-) # the data are not normalized yet. The factors are just stored in dge$samples$norm.factors for later use
+) # the data are not normalized yet. The factors are just stored in dge$samples$norm.factors
 ```
 
-(discuss DGE object and norm factors, not yet applied)
+The DGE object contains the expression values, sample information, and calculated normalization factors. These factors are not applied to the data yet, but are stored in the object for later use.
 
 ```{r}
 #| label: Display-dge
@@ -172,7 +193,11 @@ dge <- calcNormFactors( # Calculate scaling factors to convert the raw library s
 print(head(dge$samples))
 ```
 
-(code commentary)
+Importantly, only 18,994 genes were retained by filterByExpr() of the initial 58,051. The analyses below are only taking into account 32.72% of the measured genes, just those determined to have large enough counts to potentially exhibit a signal against background noise.
+
+{{< pagebreak >}}
+
+Next, a design matrix is prepared from the levels in $group to guide the modeling. The voom() function from limma transforms the raw counts into log2 counts-per-million (log2CPM) so that the data are usable to limma's workflow.
 
 ```{r}
 #| label: Analysis-1-design
@@ -181,15 +206,22 @@ design_mat <- model.matrix(~ 0 + group, data = phenotypes_baseline) # prepare th
 
 colnames(design_mat) <- levels(phenotypes_baseline$group) # adjust names
 
-voom_res <- voom(counts = dge, design = design_mat, plot = TRUE) # transform count data to log2 counts-per-million (logCPM)
+voom_res <- voom(counts = dge, design = design_mat, plot = TRUE)
+  # transform count data to log2 counts-per-million (log2CPM)
   # incorporates the calc norm factors
 ```
 
-(code commentary) 
+Specifically, this is what voom is doing:
+
+1. Counts are transformed to log2 counts per million reads (CPM), based on the normalization factors calculated earlier.
+2. A linear model is fitted to each gene, and the residuals are calculated.
+3. A smoothed curve is fitted to the sqrt(residual standard deviation) by average expression.
+4. Weights for each gene and sample are calculated from the smoothed curve and stored for use in limma along with the log2 CPMs.
 
 {{< pagebreak >}}
 
 ### Principal Components Analysis
+With the preprocessing complete, Principal Components Analysis (PCA) can be used to provide an overview of the sequencing profiles and general variance in the data. 
 
 ```{r}
 #| label: Analysis-1-PCA
@@ -200,12 +232,12 @@ pca <- prcomp( # perform PCA
   scale. = TRUE
 )
 
-pca$rotation |>
+pca$rotation |> # save the PCA loadings
   as.data.frame() |>
   rownames_to_column("gene") |>
   write_csv(file = file.path("data_processed", "analysis1_pca_loadings.csv"))
 
-pca_df <- pca$x |>
+pca_df <- pca$x |> # prepare the principal components
   as.data.frame() |>
   rownames_to_column("case")
 
@@ -217,7 +249,7 @@ dir.create(file.path("output", "plots"), showWarnings = FALSE, recursive = TRUE)
 
 library(cowplot)
 
-pca_plot <- pca_df |>
+pca_plot <- pca_df |> # plot the principal components, coloring by group
   left_join(y = phenotypes_baseline, by = c("case" = "geo_accession")) |>
   ggplot(aes(x = PC1, y = PC2, color = group, shape = gender)) +
     geom_point(alpha = 0.75, size = 2) +
@@ -240,9 +272,7 @@ save_plot(
 ```
 
 {{< pagebreak >}}
-
-(describe PCA overview)
-(noticeable contrast between active TB and the recent contact subjects)
+While the PCA does not cleanly discriminate all groups, PC1 generally shows a contrast between the active TB cases and the recent contact pool of cases. No apparent trend is captured by PC2, and notably, the profiles do not demonstrate any gender-dependent clustering.
 
 ```{r}
 #| label: Analysis-1-PCA-plot
@@ -254,7 +284,7 @@ pca_plot
 {{< pagebreak >}}
 
 ### Fitting linear models
-(uses original limma function)
+The next sensible step is to look into which features drive the differences observed in the PCA and to explore other contrasts of interest. In the following code chunk, the voom-normalized expression values and design matrix are submitted to limma's lmFit() function. This function fits a linear model for each gene in a series.
 
 ```{r}
 #| label: Analysis-1-limma
@@ -267,27 +297,29 @@ fit <- lmFit(
 print(head(coef(fit)))
 ```
 
-(describe limma output)
+The coefficients of the fitted models describe the differences between the RNA sources hybridized to the arrays. To actually test the differences between groups, first, the group comparisons are specified in a contrasts matrix. This produces coefficients indicating whether a given gene is enriched in one group versus another.
 
 ```{r}
 #| label: Analysis-1-contrasts
 
-contrasts_mat <- makeContrasts(
+contrasts_mat <- makeContrasts( # specifies group contrasts
   ATB_vs_allContacts = Active_TB - (Control + LTBI + LTBI_Progressor)/3,
   ATB_vs_Controls = Active_TB - Control,
+  ATB_vs_LTBI = Active_TB - LTBI,
   Progressors_vs_LTBI = LTBI_Progressor - LTBI,
   levels = design_mat
 )
 
-fit2 <- contrasts.fit(fit, contrasts_mat) |>
-  eBayes()
+fit2 <- contrasts.fit(fit, contrasts_mat) |> # compute coefficients and standard errors
+  eBayes() # empirical Bayes moderation of the standard errors towards a global value
 
 print(head(coef(fit2)))
 ```
 
-(describe additional steps of making contrasts, eBayes)
-
 {{< pagebreak >}}
+
+### Differentially expressed genes
+The for loop below cycles through each contrast to extract the differentially abundant genes from the linear model fit. The p values are adjusted for multiple comparisons using the Benjamini-Hochberg method.
 
 ```{r}
 #| label: Analysis-1-exports
@@ -316,7 +348,7 @@ for (i in seq_along(colnames(contrasts_mat))) {
       )
     )
 
-  DE_genes[[colnames(contrasts_mat)[i]]] <- top_table
+  DE_genes[[colnames(contrasts_mat)[i]]] <- top_table # gather results in a list
 
 }
 
@@ -324,7 +356,7 @@ for (i in seq_along(colnames(contrasts_mat))) {
 
 {{< pagebreak >}}
 
-### Plotting differentially expressed features
+This next section collapses the list of differentially-expressed genes into a dataframe for plotting each contrast in a facet of the figure.
 
 ```{r}
 #| label: Analysis-1-plot-features
@@ -335,7 +367,7 @@ DE_genes_plot <- DE_genes_df |>
   mutate(significant = adj.P.Val < .05 & abs(logFC) > 1) |>
   ggplot(aes(x = logFC, y = -log10(adj.P.Val), color = significant)) +
     geom_point(size = 1, alpha = 0.8) +
-    facet_wrap(~ contrast, nrow = 1) +
+    facet_wrap(~ contrast) +
     theme_half_open() +
     theme(legend.position = "bottom") +
     scale_color_manual(values = c("FALSE" = "grey70", "TRUE" = "#48bda6")) +
@@ -352,11 +384,34 @@ DE_genes_plot <- DE_genes_df |>
 cowplot::save_plot(
   filename = file.path("output", "plots", "analysis1_limma_contrasts.png"),
   plot = DE_genes_plot,
-  bg = "white"
+  bg = "white",
+  base_height = 6,
+  base_width = 4
 )
-
-DE_genes_plot
 ```
 
-## Analysis 2
+{{< pagebreak >}}
+
+These volcano plots corroborate the group differences observed in the PCA, where active TB cases show distinct expression profiles compared to the recent contact cases. 
+
+```{r}
+#| label: Analysis-1-volcano
+#| echo: false
+
+knitr::include_graphics(file.path("output", "plots", "analysis1_limma_contrasts.png"))
+```
+
+For these active TB contrasts, over half of the retained features were found to be differentially expressed. The LTBI_Progressor vs LTBI profiles still exhibited over 2,000 differentially expressed genes.
+
+```{r}
+#| label: Analysis-1-DE_genes
+
+DE_genes_df |> filter(adj.P.Val < .05) |> count(contrast)
+```
+
+{{< pagebreak >}}
+
+(What next for Analysis 1? Checking gene identities? re-PCA from a subset of only the DE genes?)
+
+## Analysis 2 — LTBI longitudinal view
 (look at the longitudinal view within LTBI)
