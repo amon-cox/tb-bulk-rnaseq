@@ -22,7 +22,7 @@ The Leicester RNA‑seq cohort (GSE107994) used here includes longitudinal whole
 
 The authors used a modular analysis framework to group co‑expressed genes into immune “modules” (e.g. type I interferon–inducible, B‑cell, and T‑cell modules). They showed that active TB is characterized by overabundance of type I interferon‑inducible transcripts and underabundance of IFNG/TBX21 and B‑/T‑cell–associated genes, and that some individuals with LTBI display “outlier” active‑TB‑like signatures, suggesting phenotypic heterogeneity and possible higher progression risk.
 
-For this project intended to familiarize myself with bulk RNA-seq data, I focus first on a cross‑sectional baseline comparison between active TB, LTBI, and controls to reproduce key aspects of the transcriptional signature (e.g., interferon‑related changes), and then extend to longitudinal dynamics and heterogeneity within the LTBI and LTBI‑progressor groups.
+For this project intended to familiarize myself with bulk RNA-seq data, I focus first on a cross‑sectional baseline comparison between active TB, LTBI, and controls to reproduce key aspects of the transcriptional signature (e.g., interferon‑related changes).
 
 > Singhania A, Verma R, Graham CM, Lee J et al. A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection. Nat Commun 2018 Jun 19;9(1):2308. [PMID: 29921861](https://doi.org/10.1038/s41467-018-04579-w)
 
@@ -310,6 +310,8 @@ fit <- lmFit(
 print(head(coef(fit)))
 ```
 
+{{< pagebreak >}}
+
 The coefficients of the fitted models describe the differences between the RNA sources hybridized to the arrays. To actually test the differences between groups, first, the group comparisons are specified in a contrasts matrix. This produces coefficients indicating whether a given gene is enriched in one group versus another.
 
 ```{r}
@@ -387,7 +389,7 @@ p_DE_genes <- DE_genes_df |>
   ggplot(aes(x = logFC, y = -log10(adj.P.Val), color = significant)) +
     geom_point(size = 1, alpha = 0.8) +
     facet_wrap(~ contrast) +
-    theme_half_open() +
+    cowplot::theme_half_open() +
     theme(legend.position = "bottom") +
     scale_color_manual(values = c("FALSE" = "grey70", "TRUE" = "#48bda6")) +
     scale_y_continuous(expand = c(0,0), limits = c(0,NA)) +
@@ -464,7 +466,7 @@ p_pca_DE_activeTB <- pca_DE_activeTB$x |>
       title = "PCA of voom-normalized expression",
       subtitle = paste0(
         "On ", length(DE_activeTB),
-        " DE genes for active TB (n = 53) vs contacts (n = 108)"
+        " DE genes for active TB vs contacts"
       ),
       x = paste0("PC1 (", round(prop_var[1], 2), "%)"),
       y = paste0("PC2 (", round(prop_var[2], 2), "%)")
@@ -527,7 +529,7 @@ p_biotypes <- DE_biotype_counts |>
     scale_y_continuous(limits = c(0, NA), expand = c(0,0)) +
     coord_flip() +
     facet_wrap(~ contrast, drop = FALSE) +
-    theme_half_open(6) +
+    cowplot::theme_half_open(6) +
     labs(
       title = "Gene counts per biotype",
       x = NULL,
@@ -555,7 +557,98 @@ knitr::include_graphics(file.path("output", "analysis_1", "plots", "gene_biotype
 
 {{< pagebreak >}}
 
-## WIP
-- check gene biotypes and identities
-- compare DE genes to authors' findings
-- Analysis 2 — longitudinal view within LTBI
+### TB Signature
+Beyond establishing the quantity of differentially expressed genes, the next step is to provide clinical context to these results. To qualitatively compare with the modular 20-gene TB signature described by Singhania et al., a small panel of interferon‑inducible genes (e.g. IFI44L, IFIT3, OAS1, MX1) and T‑ and B‑cell–associated genes (IFNG, TBX21, CD3D, CD19) were examined.
+
+```{r}
+#| label: Analysis-1-gene-checks
+
+# Specify gene sets of interest.
+ifn_genes <- c("IFI44L", "IFI44", "IFIT3", "IFIT1", "OAS1", "OAS2", "MX1", "STAT1")
+tcell_genes <- c("IFNG", "TBX21", "CD3D", "CD3E", "CD4", "CXCR3")
+bcell_genes <- c("CD19", "MS4A1", "CD79A", "CD79B")
+tb_signature <- c(
+  "APOL4", "ARHGEF9", "ARNTL2", "BACH2", "BDH1", "CCDC120", "COL4A4",
+  "CTSB", "ICAM1", "KCNC4", "LIMK1", "PAIP2B", "SCARF1", "SMYD5",
+  "SPHK1", "TMEM25", "TRAF4", "TRIM47", "USP54", "VEGFB"
+)
+
+# Function to filter the differentially expressed genes by target sets.
+get_panel <- function(de_df = DE_genes_df, gene_panel, contrast_name = "ATB_vs_allContacts") {
+
+  de_df |>
+    left_join(
+      y = select(counts, Genes, Gene_name, Gene_biotype),
+      by = c("gene" = "Genes")
+    ) |>
+    filter(
+      contrast == contrast_name,
+      Gene_name %in% gene_panel
+    )
+}
+
+de_ifn <- get_panel(gene_panel = ifn_genes)
+de_tcell <- get_panel(gene_panel = tcell_genes)
+de_bcell <- get_panel(gene_panel = bcell_genes)
+de_tb_sig <- get_panel(gene_panel = tb_signature)
+
+# Merge the target sets data.
+de_panel <- bind_rows(
+  de_ifn |> mutate(panel = "IFN"),
+  de_tcell |> mutate(panel = "T-cell"),
+  de_bcell |> mutate(panel = "B-cell"),
+  de_tb_sig |> mutate(panel = "Singhania et al. TB sig")
+) |>
+  mutate(
+    Gene_name = forcats::fct_reorder(Gene_name, logFC, .desc = TRUE),
+    panel = factor(panel, levels = c("IFN", "T-cell", "B-cell", "Singhania et al. TB sig"))
+  )
+
+# Simple comparison plot of log2 fold changes by target sets.
+p_de_panel <- de_panel |>
+  ggplot(aes(x = Gene_name, y = logFC, fill = panel)) +
+    geom_col() +
+    coord_flip() +
+    facet_wrap(~ panel, scales = "free_y") +
+    cowplot::theme_half_open() +
+    theme(
+      legend.position = "none",
+      axis.text.y = element_text(size = 8)
+    ) +
+    labs(
+      x = NULL,
+      y = "log2 fold change (Active TB vs all contacts)",
+      title = "Fold changes for marker genes"
+    )
+
+cowplot::save_plot(
+  filename = file.path("output", "analysis_1", "plots", "DE_marker_genes.png"),
+  plot = p_de_panel,
+  bg = "white",
+  base_width = 6,
+  base_height = 6
+)
+```
+
+{{< pagebreak >}}
+
+In the ATB vs contacts contrast, interferon‑inducible genes were markedly upregulated in active TB, while IFNG/TBX21 and several lymphocyte‑associated genes showed lower expression in ATB, consistent with the overabundance of type I IFN–inducible transcripts and underabundance of B‑ and T‑cell–associated genes in active disease reported by Singhania et al.
+
+```{r}
+#| label: Analysis-1-plot-markers
+#| echo: false
+
+knitr::include_graphics(file.path("output", "analysis_1", "plots", "DE_marker_genes.png"))
+```
+
+### Analysis 1 Summary
+Overall, baseline differential expression between active TB and recent contacts involves over half of the expressed genes, with PCA and volcano plots demonstrating a disease‑aligned signal. Looking at interferon-inducible genes and lymphocyte-associated markers confirms the increased expression of IFN-stimulated genes and relative underexpression of IFNG/TBX21 and B/T‑cell genes in active TB, which is in line with the modular blood signature described by Singhania et al.
+
+{{< pagebreak >}}
+
+## Future Directions
+This project served to familiarize myself with bulk RNA-seq data, including the standard limma-voom workflow. GSE107994 is a rich dataset capturing active TB cases, latent TB infection, and controls spanning both sexes, a range of ages, and multiple tuberculosis disease types. I intend to return to this dataset to practice additional study designs and analytical tools, such as:
+
+- Gene set enrichment analysis
+- Analysis 2 — Longitudinal view within LTBI
+- Analysis 3 — Transcriptional differences among TB disease types
