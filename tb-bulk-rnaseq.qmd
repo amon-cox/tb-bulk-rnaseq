@@ -39,9 +39,7 @@ library(readxl)
 library(Biobase)
 library(GEOquery)
 
-dir.create(file.path("data_raw"), showWarnings = FALSE) # establish directory to raw data downloads
-
-data_dir <- file.path("data_raw", "GSE107994") # establish path to specific study directory
+dir.create(file.path("data_raw"), showWarnings = FALSE)
 ```
 
 ### Download data from GSE
@@ -50,17 +48,21 @@ Accessing GEO can be time-intensive, so the first section of this code chunk che
 ```{r}
 #| label: Download-counts
 
-if (!dir.exists(data_dir) || length(list.files(data_dir)) == 0) { # checks for supplemental files from GSE107994
-  getGEOSuppFiles("GSE107994", baseDir = "data_raw") # accesses GEO for supplemental files (gene counts for all samples)
+data_dir <- file.path("data_raw", "GSE107994")
+
+# Accessing GEO can be time-intensive ...
+# ... so this checks if the directory and files are present first.
+if (!dir.exists(data_dir) || length(list.files(data_dir)) == 0) {
+  getGEOSuppFiles("GSE107994", baseDir = "data_raw")
 }
 
-counts_file <- list.files( # grabs the specific file name for the raw gene counts data
+counts_file <- list.files(
   path = data_dir,
   pattern = "Raw_counts.*Leicester.*\\.xlsx$",
   full.names = TRUE
 )
 
-counts <- readxl::read_xlsx(counts_file) # function to import .xlsx file as data table
+counts <- readxl::read_xlsx(counts_file)
 ```
 
 This section accesses GEO again to retrieve the series matrix, which contains the metadata (e.g. patient info, phenotypes) for the RNA-seq profiles.
@@ -68,8 +70,11 @@ This section accesses GEO again to retrieve the series matrix, which contains th
 ```{r}
 #| label: Download-phenotypes
 
-gse <- getGEO("GSE107994", GSEMatrix = TRUE) # grabs the series matrix from GEO
-phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble() # formats GSE download as tabular metadata
+# Grab the series matrix (sample metadata) from GEO ...
+gse <- getGEO("GSE107994", GSEMatrix = TRUE)
+
+# ... and format as a usable table.
+phenotypes <- Biobase::pData(gse[[1]]) |> as_tibble()
 ```
 
 {{< pagebreak >}}
@@ -100,10 +105,10 @@ Before moving on to analysis, the data are saved to an intermediate folder for e
 ```{r}
 #| label: Store-data
 
-dir.create("data_processed", showWarnings = FALSE) # create data_processed directory folder if it does not exist
+dir.create("data_processed", showWarnings = FALSE) 
 
-write_tsv(phenotypes, file.path("data_processed", "GSE107994_phenotypes.tsv")) # save phenotypes locally
-write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv")) # save counts locally
+write_tsv(phenotypes, file.path("data_processed", "GSE107994_phenotypes.tsv"))
+write_tsv(counts, file.path("data_processed", "GSE107994_counts_raw.tsv"))
 ```
 
 {{< pagebreak >}}
@@ -117,7 +122,7 @@ The code below selects columns of interest from the metadata and renames them fo
 #| label: Analysis-1-setup
 
 phenotypes_baseline <- phenotypes |> 
-  select( # subset phenotypes to the columns of interest
+  select( # Subset phenotypes to the columns of interest.
     geo_accession,
     patient_id = 'patient_id:ch1',
     group = 'group:ch1',
@@ -132,7 +137,7 @@ phenotypes_baseline <- phenotypes |>
     visit_date = 'visit_date:ch1',
     title
 ) |>
-  mutate( # apply some factor levels to multiple variables of interest
+  mutate( # Apply factor levels to multiple variables of interest.
     group = factor(group, levels = c("Control", "Active_TB", "LTBI", "LTBI_Progressor")),
     tb_disease_type = factor(tb_disease_type),
     smear_result = factor(smear_result, levels = c("Negative", "Positive")),
@@ -142,21 +147,21 @@ phenotypes_baseline <- phenotypes |>
     outlier == "No",
     timepoint_months == "Baseline"
   )
-    # filter the data to remove predetermined outliers
-    # and focus on the baseline visit profiles
+    # Filter the data to remove predetermined outliers ...
+    # ... and focus on the baseline visit profiles.
 
 write_tsv(phenotypes_baseline, file = file.path("data_processed", "phenotypes_baseline.tsv"))
 
-counts_mat <- counts |> # need to convert counts to a simple matrix
+# Need to convert counts to a simple matrix.
+counts_mat <- counts |>
   select(-Gene_name, -Gene_biotype) |>
   column_to_rownames("Genes") |>
   as.matrix()
 
 colnames(counts_mat) <- phenotypes$geo_accession[match(colnames(counts_mat), phenotypes$title)]
-  # replace with shorter names
 
+# Select only cases that match the baseline subset.
 counts_baseline <- counts_mat[, phenotypes_baseline$geo_accession]
-  # select only baseline samples
 ```
 
 {{< pagebreak >}}
@@ -169,19 +174,21 @@ The edgeR package is loaded for some of its functions used to prepare the data f
 ```{r}
 #| label: Analysis-1-preprocess
 
-library(edgeR) # limma loaded as dependency
+library(edgeR) # limma loaded as dependency.
 
-dge <- DGEList(counts = counts_baseline) # create DGEList object from raw counts matrix
+# Create DGEList object from raw counts matrix.
+dge <- DGEList(counts = counts_baseline)
 
+# Determine which genes have sufficient counts to be retained in a statistical analysis.
+# Then, retain only the genes determined to have sufficiently large counts.
 keep_genes <- filterByExpr(dge, group = phenotypes_baseline$group)
-  # Determine which genes have sufficient counts to be retained in a statistical analysis
 
-dge <- dge[keep_genes, ] # retains only the genes determined to have sufficiently large counts
+dge <- dge[keep_genes, ]
 
-dge <- calcNormFactors( # Calculate scaling factors for library sizes
+dge <- calcNormFactors( # Calculate scaling factors for library sizes.
   dge,
-  method = "TMM" # trimmed mean of M-values
-) # the data are not normalized yet. The factors are just stored in dge$samples$norm.factors
+  method = "TMM" # Trimmed mean of M-values.
+) # The data are not normalized yet. The factors are just stored in dge$samples$norm.factors
 ```
 
 The DGE object contains the expression values, sample information, and calculated normalization factors. These factors are not applied to the data yet, but are stored in the object for later use.
@@ -202,13 +209,14 @@ Next, a design matrix is prepared from the levels in $group to guide the modelin
 ```{r}
 #| label: Analysis-1-design
 
-design_mat <- model.matrix(~ 0 + group, data = phenotypes_baseline) # prepare the design
+# Prepare the study design.
+design_mat <- model.matrix(~ 0 + group, data = phenotypes_baseline)
 
-colnames(design_mat) <- levels(phenotypes_baseline$group) # adjust names
+colnames(design_mat) <- levels(phenotypes_baseline$group)
 
+# Transform the counts data into log2 counts-per-million (log2CPM).
+# This step incorporates the calculated normalization factors.
 voom_res <- voom(counts = dge, design = design_mat, plot = TRUE)
-  # transform count data to log2 counts-per-million (log2CPM)
-  # incorporates the calc norm factors
 ```
 
 Specifically, this is what voom is doing:
@@ -226,30 +234,35 @@ With the preprocessing complete, Principal Components Analysis (PCA) can be used
 ```{r}
 #| label: Analysis-1-PCA
 
+# Perform PCA.
 pca <- prcomp( # perform PCA
-  x = t(voom_res$E), # must transpose data to samples x variables format
+  x = t(voom_res$E), # Transpose data to samples x variables format.
   center = TRUE,
   scale. = TRUE
 )
 
-pca$rotation |> # save the PCA loadings
+# Save the PCA loadings.
+pca$rotation |>
   as.data.frame() |>
   rownames_to_column("gene") |>
-  write_csv(file = file.path("data_processed", "analysis1_pca_loadings.csv"))
+  write_csv(file = file.path("data_processed", "analysis_1_pca_loadings.csv"))
 
-pca_df <- pca$x |> # prepare the principal components
+# Prepare the principal components.
+pca_df <- pca$x |>
   as.data.frame() |>
   rownames_to_column("case")
 
-write_csv(pca_df, file = file.path("data_processed", "analysis1_pca_scores.csv"))
+write_csv(pca_df, file = file.path("data_processed", "analysis_1_pca_scores.csv"))
 
-prop_var <- pca$sdev^2 / sum(pca$sdev^2) * 100 # calculaute proportion of variance per PC
+# Calculaute proportion of variance per PC.
+prop_var <- pca$sdev^2 / sum(pca$sdev^2) * 100
 
-dir.create(file.path("output", "plots"), showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path("output", "analysis_1", "plots"), showWarnings = FALSE, recursive = TRUE)
 
 library(cowplot)
 
-pca_plot <- pca_df |> # plot the principal components, coloring by group
+# Plot the principal components, coloring by group.
+p_pca <- pca_df |>
   left_join(y = phenotypes_baseline, by = c("case" = "geo_accession")) |>
   ggplot(aes(x = PC1, y = PC2, color = group, shape = gender)) +
     geom_point(alpha = 0.75, size = 2) +
@@ -264,8 +277,8 @@ pca_plot <- pca_df |> # plot the principal components, coloring by group
     )
 
 save_plot(
-  filename = file.path("output", "plots", "analysis1_pca.png"),
-  plot = pca_plot,
+  filename = file.path("output", "analysis_1", "plots", "pca.png"),
+  plot = p_pca,
   bg = "white"
 )
 
@@ -278,7 +291,7 @@ While the PCA does not cleanly discriminate all groups, PC1 generally shows a co
 #| label: Analysis-1-PCA-plot
 #| echo: false
 
-pca_plot
+p_pca
 ```
 
 {{< pagebreak >}}
@@ -302,7 +315,8 @@ The coefficients of the fitted models describe the differences between the RNA s
 ```{r}
 #| label: Analysis-1-contrasts
 
-contrasts_mat <- makeContrasts( # specifies group contrasts
+# Specify the group contrasts to be tested.
+contrasts_mat <- makeContrasts(
   ATB_vs_allContacts = Active_TB - (Control + LTBI + LTBI_Progressor)/3,
   ATB_vs_Controls = Active_TB - Control,
   ATB_vs_LTBI = Active_TB - LTBI,
@@ -310,8 +324,10 @@ contrasts_mat <- makeContrasts( # specifies group contrasts
   levels = design_mat
 )
 
-fit2 <- contrasts.fit(fit, contrasts_mat) |> # compute coefficients and standard errors
-  eBayes() # empirical Bayes moderation of the standard errors towards a global value
+# Compute the coefficients and standard errors ...
+# ... then apply empirical Bayes moderation of the standard errors towards a global value.
+fit2 <- contrasts.fit(fit, contrasts_mat) |>
+  eBayes()
 
 print(head(coef(fit2)))
 ```
@@ -324,7 +340,7 @@ The for loop below cycles through each contrast to extract the differentially ab
 ```{r}
 #| label: Analysis-1-exports
 
-dir.create(file.path("output", "tables"), showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path("output", "analysis_1", "tables"), showWarnings = FALSE, recursive = TRUE)
 
 DE_genes <- list()
 
@@ -340,15 +356,16 @@ for (i in seq_along(colnames(contrasts_mat))) {
     rownames_to_column("gene")
   
   top_table |>
-    dplyr::filter(adj.P.Val < .05) |> # only export significant results
+    dplyr::filter(adj.P.Val < .05) |> # Only export significant results.
     write_csv(
       file = file.path(
-        "output", "tables",
-        paste0("analysis1_limma_", colnames(contrasts_mat)[i], ".csv")
+        "output", "analysis_1", "tables",
+        paste0("limma_", colnames(contrasts_mat)[i], ".csv")
       )
     )
 
-  DE_genes[[colnames(contrasts_mat)[i]]] <- top_table # gather results in a list
+  # Gather the results in a list.
+  DE_genes[[colnames(contrasts_mat)[i]]] <- top_table
 
 }
 
@@ -361,9 +378,11 @@ This next section collapses the list of differentially-expressed genes into a da
 ```{r}
 #| label: Analysis-1-plot-features
 
-DE_genes_df <- bind_rows(DE_genes, .id = "contrast") # collapse list to data frame
+# Collapse results list to dataframe.
+DE_genes_df <- bind_rows(DE_genes, .id = "contrast")
 
-DE_genes_plot <- DE_genes_df |>
+# Create volcano plots of gene log2 fold changes by contrast.
+p_DE_genes <- DE_genes_df |>
   mutate(significant = adj.P.Val < .05 & abs(logFC) > 1) |>
   ggplot(aes(x = logFC, y = -log10(adj.P.Val), color = significant)) +
     geom_point(size = 1, alpha = 0.8) +
@@ -382,8 +401,8 @@ DE_genes_plot <- DE_genes_df |>
     )
 
 cowplot::save_plot(
-  filename = file.path("output", "plots", "analysis1_limma_contrasts.png"),
-  plot = DE_genes_plot,
+  filename = file.path("output", "analysis_1", "plots", "limma_contrasts.png"),
+  plot = p_DE_genes,
   bg = "white",
   base_height = 6,
   base_width = 4
@@ -398,7 +417,7 @@ These volcano plots corroborate the group differences observed in the PCA, where
 #| label: Analysis-1-volcano
 #| echo: false
 
-knitr::include_graphics(file.path("output", "plots", "analysis1_limma_contrasts.png"))
+knitr::include_graphics(file.path("output", "analysis_1", "plots", "limma_contrasts.png"))
 ```
 
 For these active TB contrasts, over half of the retained features were found to be differentially expressed. The LTBI_Progressor vs LTBI profiles still exhibited over 2,000 differentially expressed genes.
@@ -411,8 +430,132 @@ DE_genes_df |> filter(adj.P.Val < .05) |> count(contrast)
 
 {{< pagebreak >}}
 
+### PCA on DE genes subset
+To check the disease "signal" captured by these DE genes, another PCA is performed on the voom-normalized expression data subset to contain only the 12,269 DE genes from the active TB versus all recent contacts contrast.
+
+```{r}
+#| label: Analysis-1-DE-PCA
+
+DE_activeTB <- DE_genes_df |>
+  filter(contrast == "ATB_vs_allContacts" & adj.P.Val < .05) |>
+  pull(gene) |>
+  unique()
+
+expr_DE_activeTB <- voom_res$E[DE_activeTB, ]
+
+pca_DE_activeTB <- prcomp(
+  x = t(expr_DE_activeTB),
+  center = TRUE,
+  scale. = TRUE
+)
+
+prop_var <- pca_DE_activeTB$sdev^2 / sum(pca_DE_activeTB$sdev^2) * 100
+
+p_pca_DE_activeTB <- pca_DE_activeTB$x |>
+  as.data.frame() |>
+  rownames_to_column("case") |>
+  left_join(y = phenotypes_baseline, by = c("case" = "geo_accession")) |>
+  ggplot(aes(x = PC1, y = PC2, color = group, shape = gender)) +
+    geom_point(alpha = 0.75, size = 2) +
+    theme_minimal_grid() +
+    coord_fixed(ratio = 1) +
+    scale_color_viridis_d(direction = -1, begin = 0.1, end = 1) +
+    labs(
+      title = "PCA of voom-normalized expression",
+      subtitle = paste0(
+        "On ", length(DE_activeTB),
+        " DE genes for active TB (n = 53) vs contacts (n = 108)"
+      ),
+      x = paste0("PC1 (", round(prop_var[1], 2), "%)"),
+      y = paste0("PC2 (", round(prop_var[2], 2), "%)")
+    )
+
+cowplot::save_plot(
+  filename = file.path("output", "analysis_1", "plots", "pca_DE_activeTB.png"),
+  plot = p_pca_DE_activeTB,
+  bg = "white"
+)
+```
+
+{{< pagebreak >}}
+
+This DE-subset PCA shows the same structure and distribution as the PCA on the global data. Notably, more variance is captured in the first PC, while slightly less variance is captured by PC2, compared to the global PCA. This is an expected result considering over half of the genes retained by initial library size filters were found to be differentially expressed between these groups.
+
+```{r}
+#| label: Analysis-1-DE-PCA-plot
+#| echo: false
+
+knitr::include_graphics(file.path("output", "analysis_1", "plots", "pca_DE_activeTB.png"))
+```
+
+{{< pagebreak >}}
+
+### Biotypes of DE genes
+To quickly gauge the kinds of genes contributing to these differences, the biotype information provided by the initial counts file can be easily counted both globally and per contrast from limma.
+
+```{r}
+#| label: Analysis-1-Biotypes
+
+global_biotypes <- counts |>
+  count(Gene_biotype) |>
+  mutate(contrast = "Global")
+
+DE_genes_info <- left_join(
+  x = DE_genes_df,
+  y = select(counts, Genes, Gene_name, Gene_biotype),
+  by = c("gene" = "Genes")
+)
+
+DE_biotype_counts <- DE_genes_info |>
+  filter(adj.P.Val < .05) |> # Retain only significant features.
+  group_by(contrast) |>
+  count(Gene_biotype) |> # Counts of genes belonging to each biotype, per group.
+  ungroup() |> # Ungroup to add new cases.
+  bind_rows(global_biotypes) # Add global biotype counts.
+
+p_biotypes <- DE_biotype_counts |>
+  filter(!contrast %in% c("ATB_vs_Controls", "ATB_vs_LTBI")) |> # Remove uninformative contrasts.
+  mutate(contrast = factor(contrast,
+    levels = c("Global", "ATB_vs_allContacts", "Progressors_vs_LTBI")
+  )) |>
+  group_by(contrast) |>
+  mutate(Gene_biotype = forcats::fct_reorder(Gene_biotype, n, .desc = TRUE)) |>
+  ungroup() |>
+  ggplot(aes(x = Gene_biotype, y = n)) +
+    geom_col() +
+    scale_x_discrete(limits = rev) +
+    scale_y_continuous(limits = c(0, NA), expand = c(0,0)) +
+    coord_flip() +
+    facet_wrap(~ contrast, drop = FALSE) +
+    theme_half_open(6) +
+    labs(
+      title = "Gene counts per biotype",
+      x = NULL,
+      y = NULL
+    )
+
+cowplot::save_plot(
+  filename = file.path("output", "analysis_1", "plots", "gene_biotypes_counts.png"),
+  plot = p_biotypes,
+  bg = "white"
+)
+
+```
+
+{{< pagebreak >}}
+
+The majority of genes accounted for in the data are, as would be expected, protein-coding (around 19,000). The majority of differentially expressed genes are similarly of the protein-coding variety. Many other biotypes have counts below 100 or even below 10, and thus are practically invisible on the plot.
+
+```{r}
+#| label: Analysis-1-Biotypes-plot
+#| echo: false
+
+knitr::include_graphics(file.path("output", "analysis_1", "plots", "gene_biotypes_counts.png"))
+```
+
+{{< pagebreak >}}
+
 ## WIP
-- re-PCA from subset of only DE genes
 - check gene biotypes and identities
 - compare DE genes to authors' findings
 - Analysis 2 — longitudinal view within LTBI
