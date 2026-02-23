@@ -25,7 +25,7 @@ For this project intended to familiarize myself with bulk RNA-seq data, I focus 
 
 ## Results
 
-Reproduce the results report with:
+The methods and results are available in a [Quarto report (PDF)](tb-bulk-rnaseq.pdf), which can be reproduced with:
 
 ```r
 install.packages("renv")
